@@ -11,6 +11,8 @@ class NeuralNet:
         self.FirstMomentB = np.empty(self.depth,dtype=object)
         self.SecondMomentW = np.empty(self.depth,dtype=object)
         self.SecondMomentB = np.empty(self.depth,dtype=object)
+        self.MeanFactor = 0
+        self.BatchIter = 0
         self.LayerStruct = LayerStruct
         self.LayerNumOfW = np.empty(self.depth,dtype=object)
         self.LayerNumOfB = np.empty(self.depth,dtype=object)
@@ -27,10 +29,12 @@ class NeuralNet:
         self.NumOfBias=np.sum(self.LayerNumOfB)
         self.NumOfParameters=NumOfParameters
 
-
+        # LayerStruct[i] is the input dimension of layer i
+        # LayerStruct[i+1] is the output dimension of layer i
         for i in range(self.depth):
-            self.weight[i]=np.random.uniform(low=-1, high=1, size=(LayerStruct[i+1],LayerStruct[i]))
-            self.bias[i]=np.random.uniform(low=-1, high=1, size=(LayerStruct[i+1],1))
+            Bound=np.sqrt(6)/np.sqrt(LayerStruct[i+1]+LayerStruct[i])
+            self.weight[i]=np.random.uniform(low=-Bound, high=Bound, size=(LayerStruct[i+1],LayerStruct[i]))
+            self.bias[i]=np.zeros((LayerStruct[i+1],1))
             self.FirstMomentW[i]=np.zeros((LayerStruct[i+1],LayerStruct[i]))
             self.FirstMomentB[i]=np.zeros((LayerStruct[i+1],1))
             self.SecondMomentW[i]=self.FirstMomentW[i]
@@ -44,7 +48,7 @@ class NeuralNet:
         elif self.ActivationType=="sigmoid":
             a=1/(1+np.exp(-x))
         elif self.ActivationType=="relu":
-            a=x*np.sign(x)
+            a=np.maximum(0, x)
         return a
 
     def ActivationDerivate(self,z,a):
@@ -56,6 +60,7 @@ class NeuralNet:
             d=a*(1-a)
         elif self.ActivationType=="relu":
             d=z>0
+            d=np.array(d, dtype=int)
         return d
 
     def Evaluate(self,x):
@@ -78,8 +83,8 @@ def AutomaticGradient(x,y,Net):
         D[i]=Net.ActivationDerivate(z,v)
     z=Net.weight[-1] @ v+Net.bias[-1]
     A[-1]=z; D[-1]=z
-    ErrorVector=(z-y)/y.size
-    g=ErrorVector;
+    ErrorVector=Net.MeanFactor*(z-y)
+    g=ErrorVector
     dw=np.empty(Net.depth,dtype=object)
     db=np.empty(Net.depth,dtype=object)
 
@@ -100,21 +105,37 @@ def AutomaticGradient(x,y,Net):
 
     return dw, db
 
-def CostFunction(x,y,NN):
-    p=NN.Evaluate(x); e=y-p
+def CostFunction(x,y,Net):
+    p=Net.Evaluate(x); e=y-p
     J=np.mean(e**2)
     return J
+def ADAM(grad,FirstMoment,SecondMoment,**kwargs):
+    BiasCorrection = kwargs.get('BiasCorrection')
+    m1 = kwargs.get('m1')
+    m2 = kwargs.get('m2')
+    epsilon = 1e-8
+    iteration = kwargs.get('iteration')
+    if m1 is None:
+        m1=0.9
+    if m2 is None:
+        m2=0.999
+    FirstMoment=m1*FirstMoment+(1-m1)*grad
+    SecondMoment=m2*SecondMoment+(1-m2)*(grad**2)
+    if BiasCorrection is not None:
+        r1=1/(1-np.power(m1,iteration))
+        r2=1/(1-np.power(m2,iteration))
+        FirstMoment=r1*FirstMoment
+        SecondMoment=r2*SecondMoment
+    d=FirstMoment/(np.sqrt(SecondMoment)+epsilon)
 
-def ADAM(grad,FirstMoment,SecondMoment):
-        m1=0.9; m2=0.999; epsilon=1e-8
-        FirstMoment=m1*FirstMoment+(1-m1)*grad
-        SecondMoment=m2*SecondMoment+(1-m2)*(grad**2)
-        d=FirstMoment/(np.sqrt(SecondMoment)+epsilon)
+    return d, FirstMoment, SecondMoment
 
-        return d , FirstMoment ,SecondMoment
-
-def SGDM(grad,FirstMoment):
-    m1=0.9
+def SGDM(grad,FirstMoment,**kwargs):
+    m=kwargs.get('m')
+    if m is not None:
+        m1=m
+    else:
+        m1=0.9
     FirstMoment=m1*FirstMoment+(1-m1)*grad
     d=FirstMoment
 
@@ -144,23 +165,35 @@ def Shuffle(x,y,BatchSize):
 
     return Xdata,Ydata
 
-def FirstOrderSolver(x,y,solver,MaxIter,StepSize,BatchSize,Net):
-
+def FirstOrderSolver(x,y,solver,MaxIter,StepSize,BatchSize,Net,**kwargs):
+    Net.MeanFactor=1/y.size
+    b1 = kwargs.get('m1')
+    b2 = kwargs.get('m2')
+    BC = kwargs.get('BiasCorrection')
+    if b1 is None:
+        b1=0.9
+    if b2 is None:
+        b2=0.999
     # Assign Update Rule
     if solver=="ADAM":
+        
         def UpdateMethod(dw,db,Net):
+            iter=Net.BatchIter
             for j in range(Net.depth):
-                DescentW, Net.FirstMomentW[j], Net.SecondMomentW[j] = ADAM(dw[j],Net.FirstMomentW[j],Net.SecondMomentW[j])
-                DescentB, Net.FirstMomentB[j], Net.SecondMomentB[j] = ADAM(db[j],Net.FirstMomentB[j],Net.SecondMomentB[j])
+                DescentW, Net.FirstMomentW[j], Net.SecondMomentW[j] = \
+                ADAM(dw[j],Net.FirstMomentW[j],Net.SecondMomentW[j],iteration=iter,m1=b1,m2=b2,BiasCorrection=BC)
+                DescentB, Net.FirstMomentB[j], Net.SecondMomentB[j] = \
+                ADAM(db[j],Net.FirstMomentB[j],Net.SecondMomentB[j],iteration=iter,m1=b1,m2=b2,BiasCorrection=BC)
                 Net.weight[j]=Net.weight[j]-StepSize*DescentW
                 Net.bias[j]=Net.bias[j]-StepSize*DescentB
             UpdatedNet=Net
+
             return UpdatedNet
     elif solver=="SGDM":
         def UpdateMethod(dw,db,Net):
             for j in range(Net.depth):
-                DescentW, Net.FirstMomentW[j] = SGDM(dw[j],Net.FirstMomentW[j])
-                DescentB, Net.FirstMomentB[j] = SGDM(db[j],Net.FirstMomentB[j])
+                DescentW, Net.FirstMomentW[j] = SGDM(dw[j],Net.FirstMomentW[j],m=b1)
+                DescentB, Net.FirstMomentB[j] = SGDM(db[j],Net.FirstMomentB[j],m=b1)
                 Net.weight[j]=Net.weight[j]-StepSize*DescentW
                 Net.bias[j]=Net.bias[j]-StepSize*DescentB
             UpdatedNet=Net
@@ -180,12 +213,13 @@ def FirstOrderSolver(x,y,solver,MaxIter,StepSize,BatchSize,Net):
             sx, sy = Shuffle(x,y,BatchSize)
 
         for j in range(NumOfBatch):
+            Net.BatchIter = Net.BatchIter+1
+            # print(Net.BatchIter)
             dw, db = AutomaticGradient(sx[j],sy[j],Net)
             Net=UpdateMethod(dw,db,Net)
-
         C=CostFunction(x,y,Net)
         CostList[i]=C
-        if np.mod(i,DispNum)==0:
+        if np.mod(i+1,DispNum)==0:
             print("Iteration: {}, Cost: {:4.4f}".format(i+1, C))
 
     error=y-Net.Evaluate(x)
@@ -239,7 +273,6 @@ def MatrixToVector(Net):
 
 def VectorToMatrix(Vector,Net):
 
-        # VectorW=Vector[0:Net.NumOfWeight]
     VectorB=Vector[Net.NumOfWeight:Net.NumOfParameters]
     MatrixW=np.empty(Net.depth,dtype=object)
     MatrixB=np.empty(Net.depth,dtype=object)
@@ -274,7 +307,7 @@ def BFGS(s,y,H):
 def LineSearch(x,y,SearchVector,dp,Net):
         # Simple Backtracking Line Search
         C0=CostFunction(x,y,Net)
-        MaxIterLS=20; c=1e-4; Decay=0.5
+        MaxIterLS=30; c=1e-4; Decay=0.5
         p=MatrixToVector(Net)
         TempNN=Net
         Scalar=np.transpose(SearchVector) @ dp
@@ -293,29 +326,28 @@ def LineSearch(x,y,SearchVector,dp,Net):
 
 def QuasiNewtonSolver(x,y,Net,MaxIter):
     
-
     # BFGS Iterations
     dw0, db0 = AutomaticGradient(x,y,Net)
     p=MatrixToVector(Net)
     dp=GradMatToVec(dw0,db0,Net)
-    delta=1e-2
+    delta=1e-1
     H=delta*np.eye(Net.NumOfParameters)
 
     CostList=np.zeros((1,MaxIter))
     DispNum=np.floor(MaxIter/10)
     for i in range(MaxIter):
         # Line Search (Wolfe Condition)
-        SearchVector=-H @ dp
-        DescentVector, C0=LineSearch(x,y,SearchVector,dp,Net)
+        SearchVector = -H @ dp
+        DescentVector, C0 = LineSearch(x,y,SearchVector,dp,Net)
         s=DescentVector
         p=p+DescentVector
         Net.weight, Net.bias = VectorToMatrix(p,Net)
         dwNew, dbNew = AutomaticGradient(x,y,Net)
         dpNew = GradMatToVec(dwNew,dbNew,Net)
-        yb=dpNew-dp
-        dp=dpNew
-        H=BFGS(s,yb,H)
-        if np.mod(i,DispNum)==0:
+        yb = dpNew-dp
+        dp = dpNew
+        H = BFGS(s,yb,H)
+        if np.mod(i+1,DispNum)==0:
             print("Iteration: {}, Cost: {:4.4f}".format(i+1, C0))
         CostList[0][i]=C0
 
