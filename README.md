@@ -1,8 +1,9 @@
 # Numpy-Implementation-of-Neural-Net
 **Numpy implementation of Neural Networks with various solvers.** 
+* Capable to handle mutltivariate function approximation tasks. ( $\mathbb{R}^{N} \rightarrow \mathbb{R}$ ) 
 * This repository implements a two-stage optimization method which is popular in the scientific machine learning community, outperforms several SGD-based methods such as Adam and SGDM in various scientific computing tasks.
-* A more sophisticated implementation can be found in my MATLAB tool: 
-[Surface Fitting Neural Networks](https://github.com/S0852306/Surface-Fitting-Neural-Networks/blob/Patch0528/README.md?plain=1)
+* A more generalized and sophisticated version ( $\mathbb{R}^{N} \rightarrow \mathbb{R}^{M}$ ) can be found in my 
+[MATLAB File Exchange](https://github.com/S0852306/Surface-Fitting-Neural-Networks/blob/Patch0528/README.md?plain=1).
 * "CompareWithTorch" provides a comparison between pure SGD-Based methods(Adam) and
 the two-stage optimization strategy. 
 # Reference
